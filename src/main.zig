@@ -1,33 +1,35 @@
-//! By convention, main.zig is where your main function lives in the case that
-//! you are building an executable. If you are making a library, the convention
-//! is to delete this file and start with root.zig instead.
 const std = @import("std");
 
+// Tokens:
+// Number, Operator, FractionSeparator, ValueType
+//
+// Passing in args to zig "zig build run -- some args (wrap in double quotes if there are spaces)
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    var arg_iterator = std.process.ArgIterator.init();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    // First arg will always be the name of the program
+    _ = arg_iterator.skip();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    const expression = arg_iterator.next();
 
-    try bw.flush(); // Don't forget to flush!
+    for (expression.?) |c| {
+        const token = switch (c) {
+            // TODO Once a number is found we need to parse all digits until we reach a non-number character
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => Token{ .token_type = Type.number, .value = c },
+            '\"', '\'' => Token{ .token_type = Type.value_type, .value = c },
+            else => {
+                std.debug.print("Unsupported Char {c}\n", .{c});
+
+                return LexError.UnsupportedType;
+            },
+        };
+
+        std.debug.print("{any}\n", .{token});
+    }
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+const Type = enum { number, operator, fraction_seperator, value_type };
 
-test "fuzz example" {
-    // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-    const input_bytes = std.testing.fuzzInput(.{});
-    try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input_bytes));
-}
+const Token = struct { token_type: Type, value: u8 };
+
+const LexError = error{UnsupportedType};
