@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
 
 // Tokens:
 // Number, Operator, FractionSeparator, ValueType
@@ -31,27 +32,119 @@ pub fn main() !void {
 
     const expression = arg_iterator.next();
 
-    for (expression.?) |c| {
-        const token = switch (c) {
-            // TODO Once a number is found we need to parse all digits until we reach a non-number character
-            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => Token{ .token_type = Type.number, .value = c },
-            '\"', '\'' => Token{ .token_type = Type.value_type, .value = c },
-            '+', '-', '÷', '*' => Token{ .token_type = Type.operator, .value = c },
-            '/' => Token{ .token_type = Type.fraction_seperator, .value = c },
-            ' ' => Token{ .token_type = Type.space, .value = c },
-            else => {
-                std.debug.print("Unsupported Char {c}\n", .{c});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = gpa.allocator();
 
-                return LexError.UnsupportedType;
-            },
-        };
+    var tokens = ArrayList(*Token).init(allocator);
 
-        std.debug.print("{any}\n", .{token});
+    if (expression) |e| {
+        std.debug.print("Parsing...\n", .{});
+
+        var index: u32 = 0;
+
+        while (index < e.len) {
+            const c = e[index];
+
+            switch (c) {
+                // TODO Once a number is found we need to parse all digits until we reach a non-number character
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
+                    index = try numeric(&allocator, e, &tokens, index);
+                },
+                '\"', '\'' => {
+                    const token = try allocator.create(Token);
+
+                    token.* = Token{
+                        .token_type = Type.value_type,
+                        .value = e[index .. index + 1],
+                    };
+
+                    try tokens.append(token);
+
+                    index = index + 1;
+                },
+                '+', '-', '÷', '*' => {
+                    const token = try allocator.create(Token);
+
+                    token.* = Token{
+                        .token_type = Type.operator,
+                        .value = e[index .. index + 1],
+                    };
+
+                    try tokens.append(token);
+
+                    index = index + 1;
+                },
+                '/' => {
+                    const token = try allocator.create(Token);
+
+                    token.* = Token{
+                        .token_type = Type.fraction_seperator,
+                        .value = e[index .. index + 1],
+                    };
+
+                    try tokens.append(token);
+
+                    index = index + 1;
+                },
+                ' ' => {
+                    const token = try allocator.create(Token);
+
+                    token.* = Token{
+                        .token_type = Type.space,
+                        .value = e[index .. index + 1],
+                    };
+
+                    try tokens.append(token);
+
+                    index = index + 1;
+                },
+                else => {
+                    std.debug.print("Unsupported Char {c}\n", .{c});
+
+                    return LexError.UnsupportedType;
+                },
+            }
+
+            //std.debug.print("{any}\n", .{token});
+        }
     }
+
+    for (tokens.items) |t| {
+        std.debug.print("{any}\n", .{t});
+    }
+}
+
+fn numeric(
+    allocator: *std.mem.Allocator,
+    expression: [:0]const u8,
+    tokens: *ArrayList(*Token),
+    index: u32,
+) !u32 {
+    var finalIndex = index;
+    const token = try allocator.create(Token);
+
+    var next = expression[finalIndex];
+    while (next >= '0' and next <= '9') {
+        finalIndex += 1;
+
+        next = expression[finalIndex];
+    }
+
+    token.* = Token{
+        .token_type = Type.number,
+        .value = expression[index..finalIndex],
+    };
+
+    try tokens.append(token);
+
+    return finalIndex;
 }
 
 const Type = enum { number, operator, fraction_seperator, value_type, space };
 
-const Token = struct { token_type: Type, value: u8 };
+const Token = struct {
+    token_type: Type,
+    value: []const u8,
+};
 
 const LexError = error{UnsupportedType};
