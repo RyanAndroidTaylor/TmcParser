@@ -36,15 +36,13 @@ const ArrayList = std.ArrayList;
 //       - Find number, return with this as value
 //       - Else error with message
 //
-// Char-Tokens
-// 1           1              1    "                  +         2       '                  12             13                 16      "
-// num, space, num, sparator, num, value_type, space, operator, number, value_type, space, number, space, number, separator, number, value_type
-//
-// Refined-Tokens
-// num, fraction, operator, feet, number, fraction
-//
-// Final-Tokens
-// calc-node    operator       calc-node
+// Tokens:
+//  - number
+//  - feet
+//  - inch
+//  - fraction
+//  - combine (feet &| inch &| fraction)
+//  - operator
 //
 // Abstract Syntax Tree (AST) (When building the tree keep in mind order of operation. Not all trees will build in the same order as the Final-Tokens list)
 //           +
@@ -85,18 +83,20 @@ pub fn main() !void {
                 '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => try numericScope(&allocator, context),
                 '+', '-', '÷', '*' => try operatorScope(&allocator, context),
                 '\"', '\'' => {
-                    std.debug.print("Found a value_type {c} not attached to a number", .{c});
+                    std.debug.print("Found a value_type {c} not attached to a number\n", .{c});
 
                     return LexError.InvalidStructure;
                 },
                 '/' => {
+                    std.debug.print("Error at index: {d}\n", .{context.index});
                     return LexError.InvalidStructure;
                 },
                 ' ' => {
+                    std.debug.print("Error at index: {d}\n", .{context.index});
                     return LexError.InvalidStructure;
                 },
                 else => {
-                    std.debug.print("Unsupported Char {c}\n", .{c});
+                    std.debug.print("Unsupported Char {c} at index: {d} \n", .{ c, context.index });
 
                     return LexError.UnsupportedType;
                 },
@@ -119,7 +119,6 @@ fn numericScope(
     context: *Context,
 ) !void {
     const start_index = context.index;
-    const token = try allocator.create(Token);
 
     var next = context.peek();
     while (next >= '0' and next <= '9' and !context.isEof()) {
@@ -128,28 +127,74 @@ fn numericScope(
         next = context.peek();
     }
 
-    token.* = Token{
-        .token_type = Type.number,
-        .value = context.copyFrom(start_index),
-    };
-
     if (context.isEof()) {
+        const token = try allocator.create(Token);
+
+        token.* = Token{
+            .token_type = Type.number,
+            .value = context.copyFrom(start_index),
+        };
+
         try context.tokens.append(token);
     } else {
-        switch (context.peek()) {
+        return switch (context.peek()) {
             ' ' => {
+                const token = try allocator.create(Token);
+
+                token.* = Token{
+                    .token_type = Type.number,
+                    .value = context.copyFrom(start_index),
+                };
+
                 context.consumeChar();
 
                 try context.tokens.append(token);
             },
-            '\'', '\"' => return LexError.UnsupportedType, //TODO Go to value_type scope
+            '\'', '\"' => {
+                try valueTypeScope(allocator, context, start_index);
+            },
             else => {
                 std.debug.print("UnsupportedType \'{c}\' found while parsing numeric scope. At index {d}\n", .{ context.peek(), context.index });
 
                 return LexError.UnsupportedType;
             },
-        }
+        };
     }
+}
+
+fn valueTypeScope(
+    allocator: *std.mem.Allocator,
+    context: *Context,
+    start_index: u32,
+) !void {
+    const token = try allocator.create(Token);
+    const value = context.copyFrom(start_index);
+    const char = context.takeChar();
+
+    switch (char) {
+        '\'' => {
+            token.* = Token{
+                .token_type = Type.feet,
+                .value = value,
+            };
+        },
+        '\"' => {
+            token.* = Token{
+                .token_type = Type.inch,
+                .value = value,
+            };
+        },
+        else => {
+            std.debug.print("UnsupportedType \'{c}\' found while parsing value_type scope. At index {d}\n", .{ context.peek(), context.index });
+
+            return LexError.UnsupportedType;
+        },
+    }
+
+    // Temp consume space until combine scope is setup
+    context.consumeChar();
+
+    try context.tokens.append(token);
 }
 
 fn operatorScope(
@@ -174,6 +219,7 @@ const Type = enum {
     number,
     feet,
     inch,
+    fraction,
     combine,
     operator,
 };
