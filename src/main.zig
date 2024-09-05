@@ -81,7 +81,7 @@ pub fn main() !void {
             switch (c) {
                 // TODO Once a number is found we need to parse all digits until we reach a non-number character
                 '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => try numericScope(&allocator, context),
-                '+', '-', '÷', '*' => try operatorScope(&allocator, context),
+                '+', '-', 195, '*' => try operatorScope(&allocator, context),
                 '\"', '\'' => {
                     std.debug.print("Found a value_type {c} not attached to a number\n", .{c});
 
@@ -96,7 +96,7 @@ pub fn main() !void {
                     return LexError.InvalidStructure;
                 },
                 else => {
-                    std.debug.print("Unsupported Char {c} at index: {d} \n", .{ c, context.index });
+                    std.debug.print("Unsupported Char {d} at index: {d} \n", .{ c, context.index });
 
                     return LexError.UnsupportedType;
                 },
@@ -136,30 +136,38 @@ fn numericScope(
         };
 
         try context.tokens.append(token);
-    } else {
-        return switch (context.peek()) {
-            ' ' => {
-                const token = try allocator.create(Token);
 
-                token.* = Token{
-                    .token_type = Type.number,
-                    .value = context.copyFrom(start_index),
-                };
-
-                context.consumeChar();
-
-                try context.tokens.append(token);
-            },
-            '\'', '\"' => {
-                try valueTypeScope(allocator, context, start_index);
-            },
-            else => {
-                std.debug.print("UnsupportedType \'{c}\' found while parsing numeric scope. At index {d}\n", .{ context.peek(), context.index });
-
-                return LexError.UnsupportedType;
-            },
-        };
+        return;
     }
+
+    if (context.peek() == ' ') {
+        context.consumeChar();
+    }
+
+    return switch (context.peek()) {
+        '+', '-', 195, '*' => {
+            const token = try allocator.create(Token);
+
+            token.* = Token{
+                .token_type = Type.number,
+                .value = context.copySlice(start_index, context.index - 1),
+            };
+
+            try context.tokens.append(token);
+
+            std.debug.print("From NumericScope ->\n", .{});
+
+            try operatorScope(allocator, context);
+        },
+        '\'', '\"' => {
+            try valueTypeScope(allocator, context, start_index);
+        },
+        else => {
+            std.debug.print("UnsupportedType \'{c}\' found while parsing numeric scope. At index {d}\n", .{ context.peek(), context.index });
+
+            return LexError.UnsupportedType;
+        },
+    };
 }
 
 fn valueTypeScope(
@@ -203,12 +211,19 @@ fn operatorScope(
 ) !void {
     const token = try allocator.create(Token);
 
+    // Divide symbol ÷ is two ascii characters and starts with 195.
+    // So when we find 195 we know to take two characers
+    const slice = if (context.peek() == 195) context.takeSlice(context.index + 2) else context.takeSlice(context.index + 1);
+
     token.* = Token{
         .token_type = Type.operator,
-        .value = context.takeSlice(context.index + 1),
+        .value = slice,
     };
 
-    if (context.takeChar() != ' ') {
+    const char = context.takeChar();
+    if (char != ' ') {
+        std.debug.print("OperatorScope -> Found '{d}', index: {d}\n", .{ char, context.index - 1 });
+
         return LexError.InvalidStructure;
     }
 
@@ -260,6 +275,10 @@ const Context = struct {
 
     fn copyFrom(self: *Context, from: u32) []const u8 {
         return self.expression[from..self.index];
+    }
+
+    fn copySlice(self: *Context, from: u32, to: u32) []const u8 {
+        return self.expression[from..to];
     }
 
     fn isEof(self: *Context) bool {
