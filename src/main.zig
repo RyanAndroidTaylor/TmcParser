@@ -162,12 +162,60 @@ fn numericScope(
         '\'', '\"' => {
             try valueTypeScope(allocator, context, start_index);
         },
+        '/' => {
+            try fractionScope(allocator, context, start_index);
+        },
         else => {
             std.debug.print("UnsupportedType \'{c}\' found while parsing numeric scope. At index {d}\n", .{ context.peek(), context.index });
 
             return LexError.UnsupportedType;
         },
     };
+}
+
+// TODO Handle EOF
+fn fractionScope(
+    allocator: *std.mem.Allocator,
+    context: *Context,
+    start_index: u32,
+) !void {
+    if (context.takeChar() != '/') {
+        std.debug.print("Context is expected to be on '/' char when entering FractionScope", .{});
+
+        return LexError.InvalidStructure;
+    }
+
+    var next = context.takeChar();
+
+    if (next < '0' or next > '9') {
+        std.debug.print("Fractions require at least one denominator but found '{c}'\n", .{next});
+
+        return LexError.InvalidStructure;
+    }
+
+    while (next >= '0' and next <= '9') {
+        next = context.takeChar();
+    }
+
+    const slice = context.copyFrom(start_index);
+
+    if (!context.isEof()) {
+        const expectedSpace = context.takeChar();
+
+        if (expectedSpace != ' ') {
+            std.debug.print("Expected a space but found '{c}'\n", .{expectedSpace});
+
+            return LexError.InvalidStructure;
+        }
+    }
+
+    const token = try allocator.create(Token);
+    token.* = Token{
+        .token_type = Type.fraction,
+        .value = slice,
+    };
+
+    try context.tokens.append(token);
 }
 
 fn valueTypeScope(
