@@ -103,14 +103,11 @@ pub fn main() !void {
             }
         }
 
-        for (context.tokens.items) |t| {
-            std.debug.print("{any}\n", .{t});
-
-            allocator.destroy(t);
+        for (context.tokens.items) |token| {
+            std.debug.print("Payload: {any}\n", .{token.type});
         }
 
-        context.tokens.deinit();
-        allocator.destroy(context);
+        context.destroy(&allocator);
     }
 }
 
@@ -128,12 +125,11 @@ fn numericScope(
     }
 
     if (context.isEof()) {
-        const token = try allocator.create(Token);
+        const payload = try allocator.create(TypePayload);
+        payload.* = TypePayload{ .number = context.copyFrom(start_index) };
 
-        token.* = Token{
-            .token_type = Type.number,
-            .value = context.copyFrom(start_index),
-        };
+        const token = try allocator.create(Token);
+        token.* = Token{ .type = payload };
 
         try context.tokens.append(token);
 
@@ -146,12 +142,13 @@ fn numericScope(
 
     return switch (context.peek()) {
         '+', '-', 195, '*' => {
-            const token = try allocator.create(Token);
-
-            token.* = Token{
-                .token_type = Type.number,
-                .value = context.copySlice(start_index, context.index - 1),
+            const payload = try allocator.create(TypePayload);
+            payload.* = TypePayload{
+                .number = context.copySlice(start_index, context.index - 1),
             };
+
+            const token = try allocator.create(Token);
+            token.* = Token{ .type = payload };
 
             try context.tokens.append(token);
 
@@ -173,17 +170,20 @@ fn numericScope(
     };
 }
 
-// TODO Handle EOF
 fn fractionScope(
     allocator: *std.mem.Allocator,
     context: *Context,
     start_index: u32,
 ) !void {
+    const numerator = context.copyFrom(start_index);
+
     if (context.takeChar() != '/') {
         std.debug.print("Context is expected to be on '/' char when entering FractionScope", .{});
 
         return LexError.InvalidStructure;
     }
+
+    const denominator_start = context.index;
 
     var next = context.takeChar();
 
@@ -197,7 +197,17 @@ fn fractionScope(
         next = context.takeChar();
     }
 
-    const slice = context.copyFrom(start_index);
+    const denominator_string = context.copySlice(denominator_start, context.index - 1);
+
+    const payload = try allocator.create(TypePayload);
+    const fraction = try allocator.create(Fraction);
+
+    fraction.* = Fraction{
+        .numerator = numerator,
+        .denominator = denominator_string,
+    };
+
+    payload.* = TypePayload{ .fraction = fraction };
 
     if (!context.isEof()) {
         const expectedSpace = context.takeChar();
@@ -210,10 +220,7 @@ fn fractionScope(
     }
 
     const token = try allocator.create(Token);
-    token.* = Token{
-        .token_type = Type.fraction,
-        .value = slice,
-    };
+    token.* = Token{ .type = payload };
 
     try context.tokens.append(token);
 }
@@ -229,16 +236,20 @@ fn valueTypeScope(
 
     switch (char) {
         '\'' => {
-            token.* = Token{
-                .token_type = Type.feet,
-                .value = value,
+            const payload = try allocator.create(TypePayload);
+            payload.* = TypePayload{
+                .feet = value,
             };
+
+            token.* = Token{ .type = payload };
         },
         '\"' => {
-            token.* = Token{
-                .token_type = Type.inch,
-                .value = value,
+            const payload = try allocator.create(TypePayload);
+            payload.* = TypePayload{
+                .inch = value,
             };
+
+            token.* = Token{ .type = payload };
         },
         else => {
             std.debug.print("UnsupportedType \'{c}\' found while parsing value_type scope. At index {d}\n", .{ context.peek(), context.index });
@@ -257,16 +268,17 @@ fn operatorScope(
     allocator: *std.mem.Allocator,
     context: *Context,
 ) !void {
-    const token = try allocator.create(Token);
-
     // Divide symbol ÷ is two ascii characters and starts with 195.
     // So when we find 195 we know to take two characers
     const slice = if (context.peek() == 195) context.takeSlice(context.index + 2) else context.takeSlice(context.index + 1);
 
-    token.* = Token{
-        .token_type = Type.operator,
-        .value = slice,
+    const payload = try allocator.create(TypePayload);
+    payload.* = TypePayload{
+        .operator = slice,
     };
+
+    const token = try allocator.create(Token);
+    token.* = Token{ .type = payload };
 
     const char = context.takeChar();
     if (char != ' ') {
@@ -278,18 +290,35 @@ fn operatorScope(
     try context.tokens.append(token);
 }
 
-const Type = enum {
-    number,
-    feet,
-    inch,
-    fraction,
+const TypePayload = union(enum) {
+    number: []const u8,
+    feet: []const u8,
+    inch: []const u8,
+    fraction: *Fraction,
     combine,
-    operator,
+    operator: []const u8,
+
+    fn destory(self: *TypePayload, allocator: *std.mem.Allocator) void {
+        if (@as(TypePayload, self.*) == TypePayload.fraction) {
+            allocator.destroy(self.fraction);
+        }
+
+        allocator.destroy(self);
+    }
+};
+
+const Fraction = struct {
+    numerator: []const u8,
+    denominator: []const u8,
 };
 
 const Token = struct {
-    token_type: Type,
-    value: []const u8,
+    type: *TypePayload,
+
+    fn destory(self: *Token, allocator: *std.mem.Allocator) void {
+        self.type.destory(allocator);
+        allocator.destroy(self);
+    }
 };
 
 const Context = struct {
@@ -331,6 +360,15 @@ const Context = struct {
 
     fn isEof(self: *Context) bool {
         return self.index == self.expression.len;
+    }
+
+    fn destroy(self: *Context, allocator: *std.mem.Allocator) void {
+        for (self.tokens.items) |t| {
+            t.destory(allocator);
+        }
+
+        self.tokens.deinit();
+        allocator.destroy(self);
     }
 };
 
