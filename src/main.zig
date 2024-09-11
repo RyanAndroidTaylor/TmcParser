@@ -1,5 +1,6 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const Context = @import("context.zig").Context;
 
 // Tokens:
 // Number, Operator, FractionSeparator, ValueType
@@ -136,6 +137,8 @@ fn numericScope(
         return;
     }
 
+    const value = context.copyFrom(start_index);
+
     if (context.peek() == ' ') {
         context.consumeChar();
     }
@@ -143,9 +146,7 @@ fn numericScope(
     return switch (context.peek()) {
         '+', '-', 195, '*' => {
             const payload = try allocator.create(TypePayload);
-            payload.* = TypePayload{
-                .number = context.copySlice(start_index, context.index - 1),
-            };
+            payload.* = TypePayload{ .number = value };
 
             const token = try allocator.create(Token);
             token.* = Token{ .type = payload };
@@ -162,12 +163,45 @@ fn numericScope(
         '/' => {
             try fractionScope(allocator, context, start_index);
         },
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
+            const expected_slash = context.peekAhead(1);
+
+            if (expected_slash != '/') {
+                std.debug.print("Expected a fraction but was unable to find '/'", .{});
+
+                return LexError.InvalidStructure;
+            }
+
+            try combineScope(allocator, context, value, null);
+        },
         else => {
             std.debug.print("UnsupportedType \'{c}\' found while parsing numeric scope. At index {d}\n", .{ context.peek(), context.index });
 
             return LexError.UnsupportedType;
         },
     };
+}
+
+fn combineScope(
+    allocaotor: *std.mem.Allocator,
+    context: *Context,
+    inch: ?[]const u8,
+    feet: ?[]const u8,
+) !void {
+    _ = allocaotor;
+    _ = context;
+
+    if (inch != null) {
+        // Since we entered CombineScope wiht an inch we are expecting the next scope to be fraction
+        // If not we need to return and error because the expression is malformed
+    } else if (feet != null) {
+        std.debug.print("CombineScope feet not implemented yet", .{});
+    } else {
+        std.debug.print("Entered CombineScope with null inch and feet", .{});
+    }
+    // Feet? -> Inch? -> Fraction?
+    // All optional but at least one required
+    // The CombineScope should only be entered with a Feet or Inch value
 }
 
 fn fractionScope(
@@ -290,15 +324,15 @@ fn operatorScope(
     try context.tokens.append(token);
 }
 
-const TypePayload = union(enum) {
+pub const TypePayload = union(enum) {
     number: []const u8,
     feet: []const u8,
     inch: []const u8,
     fraction: *Fraction,
-    combine,
+    combine: *Combine,
     operator: []const u8,
 
-    fn destory(self: *TypePayload, allocator: *std.mem.Allocator) void {
+    pub fn destory(self: *TypePayload, allocator: *std.mem.Allocator) void {
         if (@as(TypePayload, self.*) == TypePayload.fraction) {
             allocator.destroy(self.fraction);
         }
@@ -307,67 +341,22 @@ const TypePayload = union(enum) {
     }
 };
 
-const Fraction = struct {
+pub const Fraction = struct {
     numerator: []const u8,
     denominator: []const u8,
 };
 
-const Token = struct {
-    type: *TypePayload,
-
-    fn destory(self: *Token, allocator: *std.mem.Allocator) void {
-        self.type.destory(allocator);
-        allocator.destroy(self);
-    }
+pub const Combine = struct {
+    feet: ?[]const u8,
+    inch: ?[]const u8,
+    fraction: ?*Fraction,
 };
 
-const Context = struct {
-    index: u32,
-    expression: [:0]const u8,
-    tokens: *ArrayList(*Token),
+pub const Token = struct {
+    type: *TypePayload,
 
-    fn takeChar(self: *Context) u8 {
-        const char = self.expression[self.index];
-
-        self.index = self.index + 1;
-
-        return char;
-    }
-
-    fn takeSlice(self: *Context, to: u32) []const u8 {
-        const slice = self.expression[self.index..to];
-
-        self.index = to;
-
-        return slice;
-    }
-
-    fn consumeChar(self: *Context) void {
-        self.index = self.index + 1;
-    }
-
-    fn peek(self: *Context) u8 {
-        return self.expression[self.index];
-    }
-
-    fn copyFrom(self: *Context, from: u32) []const u8 {
-        return self.expression[from..self.index];
-    }
-
-    fn copySlice(self: *Context, from: u32, to: u32) []const u8 {
-        return self.expression[from..to];
-    }
-
-    fn isEof(self: *Context) bool {
-        return self.index == self.expression.len;
-    }
-
-    fn destroy(self: *Context, allocator: *std.mem.Allocator) void {
-        for (self.tokens.items) |t| {
-            t.destory(allocator);
-        }
-
-        self.tokens.deinit();
+    pub fn destory(self: *Token, allocator: *std.mem.Allocator) void {
+        self.type.destory(allocator);
         allocator.destroy(self);
     }
 };
