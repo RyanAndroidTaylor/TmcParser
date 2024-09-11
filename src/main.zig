@@ -70,17 +70,12 @@ pub fn main() !void {
         var tokens = ArrayList(*Token).init(allocator);
         var context = try allocator.create(Context);
 
-        context.* = Context{
-            .index = 0,
-            .expression = e,
-            .tokens = &tokens,
-        };
+        context.* = Context{ .index = 0, .expression = e };
 
         while (context.index < e.len) {
             const c = e[context.index];
 
-            switch (c) {
-                // TODO Once a number is found we need to parse all digits until we reach a non-number character
+            const token = switch (c) {
                 '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => try numericScope(&allocator, context),
                 '+', '-', 195, '*' => try operatorScope(&allocator, context),
                 '\"', '\'' => {
@@ -101,21 +96,27 @@ pub fn main() !void {
 
                     return LexError.UnsupportedType;
                 },
-            }
+            };
+
+            try tokens.append(token);
         }
 
-        for (context.tokens.items) |token| {
+        for (tokens.items) |token| {
             std.debug.print("Payload: {any}\n", .{token.type});
         }
 
         context.destroy(&allocator);
+        for (tokens.items) |t| {
+            t.destory(&allocator);
+        }
+        tokens.deinit();
     }
 }
 
 fn numericScope(
     allocator: *std.mem.Allocator,
     context: *Context,
-) !void {
+) !*Token {
     const start_index = context.index;
 
     var next = context.peek();
@@ -132,9 +133,7 @@ fn numericScope(
         const token = try allocator.create(Token);
         token.* = Token{ .type = payload };
 
-        try context.tokens.append(token);
-
-        return;
+        return token;
     }
 
     const value = context.copyFrom(start_index);
@@ -151,17 +150,13 @@ fn numericScope(
             const token = try allocator.create(Token);
             token.* = Token{ .type = payload };
 
-            try context.tokens.append(token);
-
-            std.debug.print("From NumericScope ->\n", .{});
-
-            try operatorScope(allocator, context);
+            return token;
         },
         '\'', '\"' => {
-            try valueTypeScope(allocator, context, start_index);
+            return try valueTypeScope(allocator, context, start_index);
         },
         '/' => {
-            try fractionScope(allocator, context, start_index);
+            return try fractionScope(allocator, context, start_index);
         },
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
             const expected_slash = context.peekAhead(1);
@@ -172,7 +167,7 @@ fn numericScope(
                 return LexError.InvalidStructure;
             }
 
-            try combineScope(allocator, context, value, null);
+            return try combineScope(allocator, context, value, null);
         },
         else => {
             std.debug.print("UnsupportedType \'{c}\' found while parsing numeric scope. At index {d}\n", .{ context.peek(), context.index });
@@ -187,28 +182,38 @@ fn combineScope(
     context: *Context,
     inch: ?[]const u8,
     feet: ?[]const u8,
-) !void {
+) !*Token {
     _ = allocaotor;
     _ = context;
 
-    if (inch != null) {
-        // Since we entered CombineScope wiht an inch we are expecting the next scope to be fraction
-        // If not we need to return and error because the expression is malformed
-    } else if (feet != null) {
-        std.debug.print("CombineScope feet not implemented yet", .{});
-    } else {
-        std.debug.print("Entered CombineScope with null inch and feet", .{});
-    }
     // Feet? -> Inch? -> Fraction?
     // All optional but at least one required
     // The CombineScope should only be entered with a Feet or Inch value
+    if (inch != null and feet != null) {
+        std.debug.print("Entered CombineScope with non null feet and inch. CombineScope should be entered with either a feet or inch value but not both", .{});
+
+        return LexError.InvalidStructure;
+    } else if (inch != null) {
+        // Since we entered CombineScope wiht an inch we are expecting the next scope to be fraction
+        // If not we need to return and error because the expression is malformed
+
+        return LexError.UnsupportedType;
+    } else if (feet != null) {
+        std.debug.print("CombineScope feet not implemented yet", .{});
+
+        return LexError.UnsupportedType;
+    } else {
+        std.debug.print("Entered CombineScope with null feet and inch. CombineScope requries there to be a non null feet or inch value", .{});
+
+        return LexError.InvalidStructure;
+    }
 }
 
 fn fractionScope(
     allocator: *std.mem.Allocator,
     context: *Context,
     start_index: u32,
-) !void {
+) !*Token {
     const numerator = context.copyFrom(start_index);
 
     if (context.takeChar() != '/') {
@@ -256,14 +261,14 @@ fn fractionScope(
     const token = try allocator.create(Token);
     token.* = Token{ .type = payload };
 
-    try context.tokens.append(token);
+    return token;
 }
 
 fn valueTypeScope(
     allocator: *std.mem.Allocator,
     context: *Context,
     start_index: u32,
-) !void {
+) !*Token {
     const token = try allocator.create(Token);
     const value = context.copyFrom(start_index);
     const char = context.takeChar();
@@ -295,13 +300,13 @@ fn valueTypeScope(
     // Temp consume space until combine scope is setup
     context.consumeChar();
 
-    try context.tokens.append(token);
+    return token;
 }
 
 fn operatorScope(
     allocator: *std.mem.Allocator,
     context: *Context,
-) !void {
+) !*Token {
     // Divide symbol ÷ is two ascii characters and starts with 195.
     // So when we find 195 we know to take two characers
     const slice = if (context.peek() == 195) context.takeSlice(context.index + 2) else context.takeSlice(context.index + 1);
@@ -321,7 +326,7 @@ fn operatorScope(
         return LexError.InvalidStructure;
     }
 
-    try context.tokens.append(token);
+    return token;
 }
 
 pub const TypePayload = union(enum) {

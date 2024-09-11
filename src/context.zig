@@ -5,7 +5,6 @@ const Token = @import("main.zig").Token;
 pub const Context = struct {
     index: u32,
     expression: [:0]const u8,
-    tokens: *ArrayList(*Token),
 
     pub fn takeChar(self: *Context) u8 {
         const char = self.expression[self.index];
@@ -48,11 +47,6 @@ pub const Context = struct {
     }
 
     pub fn destroy(self: *Context, allocator: *std.mem.Allocator) void {
-        for (self.tokens.items) |t| {
-            t.destory(allocator);
-        }
-
-        self.tokens.deinit();
         allocator.destroy(self);
     }
 };
