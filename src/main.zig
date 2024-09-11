@@ -75,7 +75,7 @@ pub fn main() !void {
         while (context.index < e.len) {
             const c = e[context.index];
 
-            const token = switch (c) {
+            const payload = switch (c) {
                 '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => try numericScope(&allocator, context),
                 '+', '-', 195, '*' => try operatorScope(&allocator, context),
                 '\"', '\'' => {
@@ -98,11 +98,14 @@ pub fn main() !void {
                 },
             };
 
+            const token = try allocator.create(Token);
+            token.* = Token{ .payload = payload };
+
             try tokens.append(token);
         }
 
         for (tokens.items) |token| {
-            std.debug.print("Payload: {any}\n", .{token.type});
+            std.debug.print("Payload: {any}\n", .{token.payload});
         }
 
         context.destroy(&allocator);
@@ -116,7 +119,7 @@ pub fn main() !void {
 fn numericScope(
     allocator: *std.mem.Allocator,
     context: *Context,
-) !*Token {
+) !*TypePayload {
     const start_index = context.index;
 
     var next = context.peek();
@@ -130,10 +133,7 @@ fn numericScope(
         const payload = try allocator.create(TypePayload);
         payload.* = TypePayload{ .number = context.copyFrom(start_index) };
 
-        const token = try allocator.create(Token);
-        token.* = Token{ .type = payload };
-
-        return token;
+        return payload;
     }
 
     const value = context.copyFrom(start_index);
@@ -147,10 +147,7 @@ fn numericScope(
             const payload = try allocator.create(TypePayload);
             payload.* = TypePayload{ .number = value };
 
-            const token = try allocator.create(Token);
-            token.* = Token{ .type = payload };
-
-            return token;
+            return payload;
         },
         '\'', '\"' => {
             return try valueTypeScope(allocator, context, start_index);
@@ -178,14 +175,11 @@ fn numericScope(
 }
 
 fn combineScope(
-    allocaotor: *std.mem.Allocator,
+    allocator: *std.mem.Allocator,
     context: *Context,
     inch: ?[]const u8,
     feet: ?[]const u8,
-) !*Token {
-    _ = allocaotor;
-    _ = context;
-
+) !*TypePayload {
     // Feet? -> Inch? -> Fraction?
     // All optional but at least one required
     // The CombineScope should only be entered with a Feet or Inch value
@@ -194,10 +188,35 @@ fn combineScope(
 
         return LexError.InvalidStructure;
     } else if (inch != null) {
+        const start_index = context.index;
+
         // Since we entered CombineScope wiht an inch we are expecting the next scope to be fraction
         // If not we need to return and error because the expression is malformed
+        var next = context.peek();
+        while (next != '/') {
+            if (context.isEof()) {
+                std.debug.print("Found end of file while lookig for '/'", .{});
 
-        return LexError.UnsupportedType;
+                return LexError.InvalidStructure;
+            }
+
+            _ = context.takeChar();
+
+            next = context.peek();
+        }
+        const fraction = try fractionScope(allocator, context, start_index);
+
+        const combine = try allocator.create(Combine);
+        combine.* = Combine{
+            .feet = null,
+            .inch = inch,
+            .fraction = fraction,
+        };
+
+        const payload = try allocator.create(TypePayload);
+        payload.* = TypePayload{ .combine = combine };
+
+        return payload;
     } else if (feet != null) {
         std.debug.print("CombineScope feet not implemented yet", .{});
 
@@ -213,11 +232,11 @@ fn fractionScope(
     allocator: *std.mem.Allocator,
     context: *Context,
     start_index: u32,
-) !*Token {
+) !*TypePayload {
     const numerator = context.copyFrom(start_index);
 
     if (context.takeChar() != '/') {
-        std.debug.print("Context is expected to be on '/' char when entering FractionScope", .{});
+        std.debug.print("Context is expected to be on '/' char when entering FractionScope\n", .{});
 
         return LexError.InvalidStructure;
     }
@@ -258,18 +277,16 @@ fn fractionScope(
         }
     }
 
-    const token = try allocator.create(Token);
-    token.* = Token{ .type = payload };
-
-    return token;
+    return payload;
 }
 
 fn valueTypeScope(
     allocator: *std.mem.Allocator,
     context: *Context,
     start_index: u32,
-) !*Token {
-    const token = try allocator.create(Token);
+) !*TypePayload {
+    //TODO Would be nice not have to pass the start_index. Maybe the NumberScope
+    // should just peek characters until it knows what to do with them?
     const value = context.copyFrom(start_index);
     const char = context.takeChar();
 
@@ -280,7 +297,10 @@ fn valueTypeScope(
                 .feet = value,
             };
 
-            token.* = Token{ .type = payload };
+            // Temp consume space until combine scope is setup
+            context.consumeChar();
+
+            return payload;
         },
         '\"' => {
             const payload = try allocator.create(TypePayload);
@@ -288,7 +308,10 @@ fn valueTypeScope(
                 .inch = value,
             };
 
-            token.* = Token{ .type = payload };
+            // Temp consume space until combine scope is setup
+            context.consumeChar();
+
+            return payload;
         },
         else => {
             std.debug.print("UnsupportedType \'{c}\' found while parsing value_type scope. At index {d}\n", .{ context.peek(), context.index });
@@ -296,17 +319,12 @@ fn valueTypeScope(
             return LexError.UnsupportedType;
         },
     }
-
-    // Temp consume space until combine scope is setup
-    context.consumeChar();
-
-    return token;
 }
 
 fn operatorScope(
     allocator: *std.mem.Allocator,
     context: *Context,
-) !*Token {
+) !*TypePayload {
     // Divide symbol ÷ is two ascii characters and starts with 195.
     // So when we find 195 we know to take two characers
     const slice = if (context.peek() == 195) context.takeSlice(context.index + 2) else context.takeSlice(context.index + 1);
@@ -316,9 +334,6 @@ fn operatorScope(
         .operator = slice,
     };
 
-    const token = try allocator.create(Token);
-    token.* = Token{ .type = payload };
-
     const char = context.takeChar();
     if (char != ' ') {
         std.debug.print("OperatorScope -> Found '{d}', index: {d}\n", .{ char, context.index - 1 });
@@ -326,7 +341,7 @@ fn operatorScope(
         return LexError.InvalidStructure;
     }
 
-    return token;
+    return payload;
 }
 
 pub const TypePayload = union(enum) {
@@ -337,9 +352,18 @@ pub const TypePayload = union(enum) {
     combine: *Combine,
     operator: []const u8,
 
+    // TODO Can this be done in a better way
     pub fn destory(self: *TypePayload, allocator: *std.mem.Allocator) void {
         if (@as(TypePayload, self.*) == TypePayload.fraction) {
             allocator.destroy(self.fraction);
+        }
+
+        if (@as(TypePayload, self.*) == TypePayload.combine) {
+            if (self.combine.fraction) |f| {
+                f.destory(allocator);
+            }
+
+            allocator.destroy(self.combine);
         }
 
         allocator.destroy(self);
@@ -354,14 +378,14 @@ pub const Fraction = struct {
 pub const Combine = struct {
     feet: ?[]const u8,
     inch: ?[]const u8,
-    fraction: ?*Fraction,
+    fraction: ?*TypePayload,
 };
 
 pub const Token = struct {
-    type: *TypePayload,
+    payload: *TypePayload,
 
     pub fn destory(self: *Token, allocator: *std.mem.Allocator) void {
-        self.type.destory(allocator);
+        self.payload.destory(allocator);
         allocator.destroy(self);
     }
 };
