@@ -131,12 +131,12 @@ fn numericScope(
 
     if (context.isEof()) {
         const payload = try allocator.create(TypePayload);
-        payload.* = TypePayload{ .number = context.copyFrom(start_index) };
+        payload.* = TypePayload{ .number = context.copyFromToCurrent(start_index) };
 
         return payload;
     }
 
-    const value = context.copyFrom(start_index);
+    const value = context.copyFromToCurrent(start_index);
 
     if (context.peek() == ' ') {
         context.consumeChar();
@@ -156,13 +156,9 @@ fn numericScope(
             return try fractionScope(allocator, context, start_index);
         },
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => {
-            const expected_slash = context.peekAhead(1);
-
-            if (expected_slash != '/') {
-                std.debug.print("Expected a fraction but was unable to find '/'", .{});
-
-                return LexError.InvalidStructure;
-            }
+            // We can only get her if we just parsed and inch and it has a fraction.
+            // If the value is a feet it will have a ' attached to it
+            // 2 1/2"  2' 1/2"   2' 1 1/2"
 
             return try combineScope(allocator, context, value, null);
         },
@@ -200,7 +196,7 @@ fn combineScope(
                 return LexError.InvalidStructure;
             }
 
-            _ = context.takeChar();
+            context.consumeChar();
 
             next = context.peek();
         }
@@ -220,6 +216,49 @@ fn combineScope(
     } else if (feet != null) {
         std.debug.print("CombineScope feet not implemented yet", .{});
 
+        // Next scope can be inch or fraction
+        // Looking for / or "
+        const start_index = context.index;
+
+        var next = context.takeChar();
+        while (context.peek() != '/' and context.peek() != '"' and context.peek() != ' ' and !context.isEof()) {
+            next = context.takeChar();
+        }
+
+        if (next == '/') {
+            const fraction = try fractionScope(allocator, context, start_index);
+            const combine = try allocator.create(Combine);
+            combine.* = Combine{
+                .feet = feet,
+                .inch = null,
+                .fraction = fraction,
+            };
+
+            const payload = try allocator.create(TypePayload);
+            payload.* = TypePayload{ .combine = combine };
+
+            return payload;
+        } else if (next == '"') {
+            const combine = try allocator.create(Combine);
+            combine.* = Combine{
+                .feet = feet,
+                .inch = context.copyFromToCurrent(start_index),
+                .fraction = null,
+            };
+
+            const payload = try allocator.create(TypePayload);
+            payload.* = TypePayload{ .combine = combine };
+
+            return payload;
+        } else if (next == ' ') {
+            //TODO Need to handle finding and inch and fraction.
+            return LexError.UnsupportedType;
+        } else {
+            std.debug.print("Was unable to find inch or fraction after feet. Here -> {any}", .{context.copyFromToEof(start_index)});
+
+            return LexError.InvalidStructure;
+        }
+
         return LexError.UnsupportedType;
     } else {
         std.debug.print("Entered CombineScope with null feet and inch. CombineScope requries there to be a non null feet or inch value", .{});
@@ -233,7 +272,7 @@ fn fractionScope(
     context: *Context,
     start_index: u32,
 ) !*TypePayload {
-    const numerator = context.copyFrom(start_index);
+    const numerator = context.copyFromToCurrent(start_index);
 
     if (context.takeChar() != '/') {
         std.debug.print("Context is expected to be on '/' char when entering FractionScope\n", .{});
@@ -284,32 +323,39 @@ fn valueTypeScope(
     allocator: *std.mem.Allocator,
     context: *Context,
     start_index: u32,
-) !*TypePayload {
-    //TODO Would be nice not have to pass the start_index. Maybe the NumberScope
-    // should just peek characters until it knows what to do with them?
-    const value = context.copyFrom(start_index);
+) LexError!*TypePayload {
+    const value = context.copyFromToCurrent(start_index);
     const char = context.takeChar();
 
     switch (char) {
         '\'' => {
-            const payload = try allocator.create(TypePayload);
-            payload.* = TypePayload{
-                .feet = value,
-            };
+            if (!context.isEof() and context.takeChar() != ' ') {
+                std.debug.print("Expected end of feet valueTypeScope here -> {any}\n", .{context.copyFromToCurrent(start_index)});
 
-            // Temp consume space until combine scope is setup
-            context.consumeChar();
+                return LexError.InvalidStructure;
+            }
 
-            return payload;
+            const next = context.peek();
+
+            if (next >= '0' and next <= '9') {
+                return try combineScope(allocator, context, null, value);
+            } else {
+                const payload = try allocator.create(TypePayload);
+                payload.* = TypePayload{
+                    .feet = value,
+                };
+
+                return payload;
+            }
         },
         '\"' => {
+            // Consume Space
+            context.consumeChar();
+
             const payload = try allocator.create(TypePayload);
             payload.* = TypePayload{
                 .inch = value,
             };
-
-            // Temp consume space until combine scope is setup
-            context.consumeChar();
 
             return payload;
         },
@@ -390,7 +436,4 @@ pub const Token = struct {
     }
 };
 
-const LexError = error{
-    UnsupportedType,
-    InvalidStructure,
-};
+const LexError = error{ UnsupportedType, InvalidStructure, OutOfMemory };

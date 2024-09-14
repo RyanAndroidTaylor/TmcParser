@@ -34,8 +34,12 @@ pub const Context = struct {
         return self.expression[self.index + amount];
     }
 
-    pub fn copyFrom(self: *Context, from: u32) []const u8 {
+    pub fn copyFromToCurrent(self: *Context, from: u32) []const u8 {
         return self.expression[from..self.index];
+    }
+
+    pub fn copyFromToEof(self: *Context, from: u32) []const u8 {
+        return self.expression[from..self.expression.len];
     }
 
     pub fn copySlice(self: *Context, from: u32, to: u32) []const u8 {
@@ -43,7 +47,7 @@ pub const Context = struct {
     }
 
     pub fn isEof(self: *Context) bool {
-        return self.index == self.expression.len;
+        return self.index >= self.expression.len;
     }
 
     pub fn destroy(self: *Context, allocator: *std.mem.Allocator) void {
