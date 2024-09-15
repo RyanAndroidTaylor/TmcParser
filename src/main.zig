@@ -259,8 +259,8 @@ fn combineScope(
 
             var fraction_next = context.takeChar();
             while (context.peek() != '/') {
-                if (context.peek() < '0' or context.peek() > 9) {
-                    std.debug.print("Found and unexpected token while parsing CombineScope. Toke: {c}\n", .{context.peek()});
+                if (context.peek() < '0' or context.peek() > '9') {
+                    std.debug.print("Found an unexpected token while parsing CombineScope. Token: {c}, Index: {d}\n", .{ context.peek(), context.index });
 
                     return LexError.InvalidStructure;
                 }
