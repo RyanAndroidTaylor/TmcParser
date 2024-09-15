@@ -214,15 +214,14 @@ fn combineScope(
 
         return payload;
     } else if (feet != null) {
-        std.debug.print("CombineScope feet not implemented yet", .{});
-
         // Next scope can be inch or fraction
         // Looking for / or "
         const start_index = context.index;
 
-        var next = context.takeChar();
-        while (context.peek() != '/' and context.peek() != '"' and context.peek() != ' ' and !context.isEof()) {
-            next = context.takeChar();
+        var next = context.peek();
+        while (next != '/' and next != '"' and next != ' ' and !context.isEof()) {
+            context.consumeChar();
+            next = context.peek();
         }
 
         if (next == '/') {
@@ -251,10 +250,45 @@ fn combineScope(
 
             return payload;
         } else if (next == ' ') {
-            //TODO Need to handle finding and inch and fraction.
-            return LexError.UnsupportedType;
+            const parsed_inch = context.copyFromToCurrent(start_index);
+
+            // Consome current space
+            context.consumeChar();
+
+            const fraction_start_index = context.index;
+
+            var fraction_next = context.takeChar();
+            while (context.peek() != '/') {
+                if (context.peek() < '0' or context.peek() > 9) {
+                    std.debug.print("Found and unexpected token while parsing CombineScope. Toke: {c}\n", .{context.peek()});
+
+                    return LexError.InvalidStructure;
+                }
+
+                if (context.isEof()) {
+                    std.debug.print("Expected a FractionScope but was unable to find '/' here -> {any}\n", .{context.copyFromToEof(fraction_start_index)});
+
+                    return LexError.InvalidStructure;
+                }
+
+                fraction_next = context.takeChar();
+            }
+
+            const fraction = try fractionScope(allocator, context, fraction_start_index);
+
+            const combine = try allocator.create(Combine);
+            combine.* = Combine{
+                .feet = feet,
+                .inch = parsed_inch,
+                .fraction = fraction,
+            };
+
+            const payload = try allocator.create(TypePayload);
+            payload.* = TypePayload{ .combine = combine };
+
+            return payload;
         } else {
-            std.debug.print("Was unable to find inch or fraction after feet. Here -> {any}", .{context.copyFromToEof(start_index)});
+            std.debug.print("Was unable to find inch or fraction after feet. Next: {c}, Index: {d}\n", .{ next, context.index });
 
             return LexError.InvalidStructure;
         }
