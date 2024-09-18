@@ -79,7 +79,7 @@ pub fn main() !void {
                 '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => try numericScope(&allocator, context),
                 '+', '-', 195, '*' => try operatorScope(&allocator, context),
                 '\"', '\'' => {
-                    std.debug.print("Found a value_type {c} not attached to a number\n", .{c});
+                    std.debug.print("Found a value_type {c} at index: {d} not attached to a number\n", .{ c, context.index });
 
                     return LexError.InvalidStructure;
                 },
@@ -239,9 +239,16 @@ fn combineScope(
             return payload;
         } else if (next == '"') {
             const combine = try allocator.create(Combine);
+            const inch_value = context.copyFromToCurrent(start_index);
+
+            // Consume " and space
+            context.consumeChar();
+            context.consumeChar();
+            std.debug.print("InchValue: {any}\n", .{inch_value});
+
             combine.* = Combine{
                 .feet = feet,
-                .inch = context.copyFromToCurrent(start_index),
+                .inch = inch_value,
                 .fraction = null,
             };
 
