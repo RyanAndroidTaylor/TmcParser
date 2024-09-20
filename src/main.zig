@@ -73,26 +73,43 @@ pub fn main() !void {
         context.* = Context{ .index = 0, .expression = e };
 
         while (context.index < e.len) {
-            const c = e[context.index];
+            const c = context.peek();
+
+            if (c == ' ') {
+                context.consumeChar();
+
+                continue;
+            }
 
             const payload = switch (c) {
-                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => try numericScope(&allocator, context),
-                '+', '-', 195, '*' => try operatorScope(&allocator, context),
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => numericScope(&allocator, context) catch |err| {
+                    cleanup(&allocator, context, &tokens);
+
+                    return err;
+                },
+                '+', '-', 195, '*' => operatorScope(&allocator, context) catch |err| {
+                    cleanup(&allocator, context, &tokens);
+
+                    return err;
+                },
                 '\"', '\'' => {
                     std.debug.print("Found a value_type {c} at index: {d} not attached to a number\n", .{ c, context.index });
+
+                    cleanup(&allocator, context, &tokens);
 
                     return LexError.InvalidStructure;
                 },
                 '/' => {
                     std.debug.print("Error at index: {d}\n", .{context.index});
-                    return LexError.InvalidStructure;
-                },
-                ' ' => {
-                    std.debug.print("Error at index: {d}\n", .{context.index});
+
+                    cleanup(&allocator, context, &tokens);
+
                     return LexError.InvalidStructure;
                 },
                 else => {
                     std.debug.print("Unsupported Char {d} at index: {d} \n", .{ c, context.index });
+
+                    cleanup(&allocator, context, &tokens);
 
                     return LexError.UnsupportedType;
                 },
@@ -108,12 +125,18 @@ pub fn main() !void {
             std.debug.print("Payload: {any}\n", .{token.payload});
         }
 
-        context.destroy(&allocator);
-        for (tokens.items) |t| {
-            t.destory(&allocator);
-        }
-        tokens.deinit();
+        cleanup(&allocator, context, &tokens);
     }
+}
+
+fn cleanup(allocator: *std.mem.Allocator, context: *Context, tokens: *ArrayList(*Token)) void {
+    context.destroy(allocator);
+
+    for (tokens.items) |t| {
+        t.destory(allocator);
+    }
+
+    tokens.deinit();
 }
 
 fn numericScope(
@@ -244,7 +267,6 @@ fn combineScope(
             // Consume " and space
             context.consumeChar();
             context.consumeChar();
-            std.debug.print("InchValue: {any}\n", .{inch_value});
 
             combine.* = Combine{
                 .feet = feet,
@@ -366,9 +388,9 @@ fn valueTypeScope(
     start_index: u32,
 ) LexError!*TypePayload {
     const value = context.copyFromToCurrent(start_index);
-    const char = context.takeChar();
+    const value_type = context.takeChar();
 
-    switch (char) {
+    switch (value_type) {
         '\'' => {
             if (!context.isEof() and context.takeChar() != ' ') {
                 std.debug.print("Expected end of feet valueTypeScope here -> {any}\n", .{context.copyFromToCurrent(start_index)});
