@@ -1,6 +1,8 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
+
 const Context = @import("context.zig").Context;
+const Tokenizer = @import("Tokenizer.zig");
 
 // Tokens:
 // Number, Operator, FractionSeparator, ValueType
@@ -65,6 +67,10 @@ pub fn main() !void {
     };
 
     if (expression) |e| {
+        //TODO Move tokenization to Tokenizer
+        // Currently leaking memory
+        _ = Tokenizer.tokenize(allocator, e);
+
         std.debug.print("Parsing...\n", .{});
 
         var tokens = ArrayList(*Token).init(allocator);
