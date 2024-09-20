@@ -1,56 +1,65 @@
-const std = @import("std");
-const ArrayList = std.ArrayList;
 const Token = @import("main.zig").Token;
+const std = @import("std");
 
-pub const Context = struct {
-    index: u32,
-    expression: [:0]const u8,
+const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
 
-    pub fn takeChar(self: *Context) u8 {
-        const char = self.expression[self.index];
+pub fn Context() type {
+    return struct {
+        const Self = @This();
 
-        self.index = self.index + 1;
+        index: u32,
+        expression: [:0]const u8,
 
-        return char;
-    }
+        pub fn init(expression: [:0]const u8) Self {
+            return Self{
+                .index = 0,
+                .expression = expression,
+            };
+        }
 
-    pub fn takeSlice(self: *Context, to: u32) []const u8 {
-        const slice = self.expression[self.index..to];
+        pub fn takeChar(self: *Self) u8 {
+            const char = self.expression[self.index];
 
-        self.index = to;
+            self.index = self.index + 1;
 
-        return slice;
-    }
+            return char;
+        }
 
-    pub fn consumeChar(self: *Context) void {
-        self.index = self.index + 1;
-    }
+        pub fn takeSlice(self: *Self, to: u32) []const u8 {
+            const slice = self.expression[self.index..to];
 
-    pub fn peek(self: *Context) u8 {
-        return self.expression[self.index];
-    }
+            self.index = to;
 
-    pub fn peekAhead(self: *Context, amount: u32) u8 {
-        return self.expression[self.index + amount];
-    }
+            return slice;
+        }
 
-    pub fn copyFromToCurrent(self: *Context, from: u32) []const u8 {
-        return self.expression[from..self.index];
-    }
+        pub fn consumeChar(self: *Self) void {
+            self.index = self.index + 1;
+        }
 
-    pub fn copyFromToEof(self: *Context, from: u32) []const u8 {
-        return self.expression[from..self.expression.len];
-    }
+        pub fn peek(self: *Self) u8 {
+            return self.expression[self.index];
+        }
 
-    pub fn copySlice(self: *Context, from: u32, to: u32) []const u8 {
-        return self.expression[from..to];
-    }
+        pub fn peekAhead(self: *Self, amount: u32) u8 {
+            return self.expression[self.index + amount];
+        }
 
-    pub fn isEof(self: *Context) bool {
-        return self.index >= self.expression.len;
-    }
+        pub fn copyFromToCurrent(self: *Self, from: u32) []const u8 {
+            return self.expression[from..self.index];
+        }
 
-    pub fn destroy(self: *Context, allocator: *std.mem.Allocator) void {
-        allocator.destroy(self);
-    }
-};
+        pub fn copyFromToEof(self: *Self, from: u32) []const u8 {
+            return self.expression[from..self.expression.len];
+        }
+
+        pub fn copySlice(self: *Self, from: u32, to: u32) []const u8 {
+            return self.expression[from..to];
+        }
+
+        pub fn isEof(self: *Self) bool {
+            return self.index >= self.expression.len;
+        }
+    };
+}

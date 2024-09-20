@@ -67,16 +67,10 @@ pub fn main() !void {
     };
 
     if (expression) |e| {
-        //TODO Move tokenization to Tokenizer
-        // Currently leaking memory
-        _ = Tokenizer.tokenize(allocator, e);
-
         std.debug.print("Parsing...\n", .{});
 
         var tokens = ArrayList(*Token).init(allocator);
-        var context = try allocator.create(Context);
-
-        context.* = Context{ .index = 0, .expression = e };
+        var context = Context().init(e);
 
         while (context.index < e.len) {
             const c = context.peek();
@@ -88,34 +82,34 @@ pub fn main() !void {
             }
 
             const payload = switch (c) {
-                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => numericScope(&allocator, context) catch |err| {
-                    cleanup(&allocator, context, &tokens);
+                '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' => numericScope(&allocator, &context) catch |err| {
+                    cleanup(&allocator, &tokens);
 
                     return err;
                 },
-                '+', '-', 195, '*' => operatorScope(&allocator, context) catch |err| {
-                    cleanup(&allocator, context, &tokens);
+                '+', '-', 195, '*' => operatorScope(&allocator, &context) catch |err| {
+                    cleanup(&allocator, &tokens);
 
                     return err;
                 },
                 '\"', '\'' => {
                     std.debug.print("Found a value_type {c} at index: {d} not attached to a number\n", .{ c, context.index });
 
-                    cleanup(&allocator, context, &tokens);
+                    cleanup(&allocator, &tokens);
 
                     return LexError.InvalidStructure;
                 },
                 '/' => {
                     std.debug.print("Error at index: {d}\n", .{context.index});
 
-                    cleanup(&allocator, context, &tokens);
+                    cleanup(&allocator, &tokens);
 
                     return LexError.InvalidStructure;
                 },
                 else => {
                     std.debug.print("Unsupported Char {d} at index: {d} \n", .{ c, context.index });
 
-                    cleanup(&allocator, context, &tokens);
+                    cleanup(&allocator, &tokens);
 
                     return LexError.UnsupportedType;
                 },
@@ -131,13 +125,11 @@ pub fn main() !void {
             std.debug.print("Payload: {any}\n", .{token.payload});
         }
 
-        cleanup(&allocator, context, &tokens);
+        cleanup(&allocator, &tokens);
     }
 }
 
-fn cleanup(allocator: *std.mem.Allocator, context: *Context, tokens: *ArrayList(*Token)) void {
-    context.destroy(allocator);
-
+fn cleanup(allocator: *std.mem.Allocator, tokens: *ArrayList(*Token)) void {
     for (tokens.items) |t| {
         t.destory(allocator);
     }
@@ -147,7 +139,7 @@ fn cleanup(allocator: *std.mem.Allocator, context: *Context, tokens: *ArrayList(
 
 fn numericScope(
     allocator: *std.mem.Allocator,
-    context: *Context,
+    context: *Context(),
 ) !*TypePayload {
     const start_index = context.index;
 
@@ -201,7 +193,7 @@ fn numericScope(
 
 fn combineScope(
     allocator: *std.mem.Allocator,
-    context: *Context,
+    context: *Context(),
     inch: ?[]const u8,
     feet: ?[]const u8,
 ) !*TypePayload {
@@ -338,7 +330,7 @@ fn combineScope(
 
 fn fractionScope(
     allocator: *std.mem.Allocator,
-    context: *Context,
+    context: *Context(),
     start_index: u32,
 ) !*TypePayload {
     const numerator = context.copyFromToCurrent(start_index);
@@ -390,7 +382,7 @@ fn fractionScope(
 
 fn valueTypeScope(
     allocator: *std.mem.Allocator,
-    context: *Context,
+    context: *Context(),
     start_index: u32,
 ) LexError!*TypePayload {
     const value = context.copyFromToCurrent(start_index);
@@ -438,7 +430,7 @@ fn valueTypeScope(
 
 fn operatorScope(
     allocator: *std.mem.Allocator,
-    context: *Context,
+    context: *Context(),
 ) !*TypePayload {
     // Divide symbol ÷ is two ascii characters and starts with 195.
     // So when we find 195 we know to take two characers
